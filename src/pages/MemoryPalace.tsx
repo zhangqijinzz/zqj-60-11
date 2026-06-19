@@ -359,8 +359,13 @@ export default function MemoryPalacePage() {
   };
 
   const handleTagChange = async () => {
-    await loadPalaces();
-    await loadTags();
+    const data = await listMemoryPalaces();
+    setPalaces(data);
+    const tags = await getAllTags();
+    setAllTags(tags);
+    if (palaceFilter.selectedTag && !tags.includes(palaceFilter.selectedTag)) {
+      setPalaceSelectedTag(null);
+    }
   };
 
   const filteredPalaces = useMemo(() => {
@@ -550,7 +555,9 @@ export default function MemoryPalacePage() {
                         我的宫殿
                       </h2>
                       <p className="text-white/50 text-sm">
-                        共 {palaces.length} 座记忆宫殿 · 凝视卡片即可进入漫游
+                        {hasActiveFilters
+                          ? `共 ${filteredPalaces.length} / ${palaces.length} 座记忆宫殿 · 凝视卡片即可进入漫游`
+                          : `共 ${palaces.length} 座记忆宫殿 · 凝视卡片即可进入漫游`}
                       </p>
                     </div>
                     {!isLoading && palaces.length > 0 && (
