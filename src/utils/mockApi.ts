@@ -258,6 +258,7 @@ export async function createMemoryPalace(
     id,
     voiceBlobUrl: blobRef,
     createdAt: Date.now(),
+    tags: [],
   };
 
   const list = (await localforage.getItem<MemoryPalace[]>('memory-palaces')) || [];
@@ -276,6 +277,7 @@ export async function listMemoryPalaces(): Promise<MemoryPalace[]> {
       voiceBlobUrl: '',
       createdAt: Date.now() - 86400000 * 3,
       isShared: false,
+      tags: ['童年', '家庭', '温馨'],
       sceneData: {
         type: 'outdoor',
         lighting: 'sunset',
@@ -312,4 +314,41 @@ export async function sharePalace(id: string): Promise<string> {
   palace.shareCode = shareCode;
   await localforage.setItem('memory-palaces', list);
   return shareCode;
+}
+
+export async function addTagToPalace(palaceId: string, tag: string): Promise<MemoryPalace | null> {
+  await delay(100);
+  const list = (await localforage.getItem<MemoryPalace[]>('memory-palaces')) || [];
+  const palace = list.find((p) => p.id === palaceId);
+  if (!palace) return null;
+  if (!palace.tags) palace.tags = [];
+  if (!palace.tags.includes(tag)) {
+    palace.tags = [...palace.tags, tag];
+    await localforage.setItem('memory-palaces', list);
+  }
+  return palace;
+}
+
+export async function removeTagFromPalace(palaceId: string, tag: string): Promise<MemoryPalace | null> {
+  await delay(100);
+  const list = (await localforage.getItem<MemoryPalace[]>('memory-palaces')) || [];
+  const palace = list.find((p) => p.id === palaceId);
+  if (!palace) return null;
+  if (palace.tags) {
+    palace.tags = palace.tags.filter((t) => t !== tag);
+    await localforage.setItem('memory-palaces', list);
+  }
+  return palace;
+}
+
+export async function getAllTags(): Promise<string[]> {
+  await delay(100);
+  const list = (await localforage.getItem<MemoryPalace[]>('memory-palaces')) || [];
+  const tagSet = new Set<string>();
+  list.forEach((p) => {
+    if (p.tags) {
+      p.tags.forEach((t) => tagSet.add(t));
+    }
+  });
+  return Array.from(tagSet).sort();
 }

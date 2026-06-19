@@ -43,6 +43,7 @@ export interface MemoryPalace {
   createdAt: number;
   isShared: boolean;
   shareCode?: string;
+  tags: string[];
 }
 
 export interface UserSettings {

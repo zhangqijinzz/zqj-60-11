@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Share2, Castle, Clock, Sparkles, Wand2, Copy, Check } from 'lucide-react';
+import { ArrowLeft, Share2, Castle, Clock, Sparkles, Wand2, Copy, Check, Search, X, Tag, Plus, Hash } from 'lucide-react';
 import { AuroraBackground } from '@/components/common/AuroraBackground';
 import { VoiceRecorder } from '@/components/common/VoiceRecorder';
 import {
@@ -10,9 +10,13 @@ import {
   listMemoryPalaces,
   sharePalace,
   saveAudioBlob,
+  addTagToPalace,
+  removeTagFromPalace,
+  getAllTags,
 } from '@/utils/mockApi';
 import type { MemoryPalace } from '@/types';
 import { cn } from '@/lib/utils';
+import { useAppStateStore } from '@/stores/appStateStore';
 
 const GENERATION_STEPS = [
   { text: '正在解析语音描述…', icon: <Wand2 className="w-5 h-5" /> },
@@ -38,10 +42,20 @@ interface PalaceCardProps {
   index: number;
   onEnter: (id: string) => void;
   onShare: (id: string) => void;
+  onTagChange: () => void;
 }
 
-function PalaceCard({ palace, index, onEnter, onShare }: PalaceCardProps) {
+function PalaceCard({ palace, index, onEnter, onShare, onTagChange }: PalaceCardProps) {
   const [copied, setCopied] = useState(false);
+  const [showTagInput, setShowTagInput] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (showTagInput && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [showTagInput]);
 
   const handleShare = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -55,6 +69,40 @@ function PalaceCard({ palace, index, onEnter, onShare }: PalaceCardProps) {
         onShare(palace.id);
       }
     }
+  };
+
+  const handleAddTag = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!newTag.trim()) {
+      setShowTagInput(false);
+      return;
+    }
+    const tag = newTag.trim();
+    await addTagToPalace(palace.id, tag);
+    setNewTag('');
+    setShowTagInput(false);
+    onTagChange();
+  };
+
+  const handleRemoveTag = async (e: React.MouseEvent, tag: string) => {
+    e.stopPropagation();
+    await removeTagFromPalace(palace.id, tag);
+    onTagChange();
+  };
+
+  const handleTagInputKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddTag(e as unknown as React.MouseEvent);
+    } else if (e.key === 'Escape') {
+      setShowTagInput(false);
+      setNewTag('');
+    }
+  };
+
+  const handleTagButtonClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowTagInput(true);
   };
 
   return (
@@ -100,9 +148,55 @@ function PalaceCard({ palace, index, onEnter, onShare }: PalaceCardProps) {
           {palace.name}
         </h3>
 
-        <p className="text-sm text-white/50 mb-4 line-clamp-2 leading-relaxed">
+        <p className="text-sm text-white/50 mb-3 line-clamp-2 leading-relaxed">
           {truncate(palace.description, 60)}
         </p>
+
+        <div className="flex flex-wrap gap-2 mb-4 min-h-[28px]">
+          {(palace.tags || []).map((tag) => (
+            <motion.span
+              key={tag}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/25 text-amber-200/80 text-xs group/tag hover:bg-amber-500/25 transition-colors"
+            >
+              <Hash className="w-3 h-3" />
+              <span>{tag}</span>
+              <button
+                onClick={(e) => handleRemoveTag(e, tag)}
+                className="opacity-0 group-hover/tag:opacity-100 ml-1 hover:text-amber-100 transition-opacity"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </motion.span>
+          ))}
+          {showTagInput ? (
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 border border-white/20" onClick={(e) => e.stopPropagation()}>
+              <input
+                ref={inputRef}
+                type="text"
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={handleTagInputKeyDown}
+                placeholder="输入标签"
+                className="bg-transparent text-white/90 text-xs w-16 outline-none placeholder:text-white/40"
+              />
+              <button onClick={handleAddTag} className="text-amber-300 hover:text-amber-100">
+                <Check className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleTagButtonClick}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-white/50 text-xs hover:bg-white/10 hover:text-white/70 hover:border-white/20 transition-all"
+            >
+              <Plus className="w-3 h-3" />
+              <span>标签</span>
+            </motion.button>
+          )}
+        </div>
 
         <div className="flex items-center gap-4 pt-4 border-t border-white/10">
           <div className="flex items-center gap-1.5 text-white/40 text-xs">
@@ -223,14 +317,30 @@ function GenerationProgress({ step }: { step: number }) {
 
 export default function MemoryPalacePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [palaces, setPalaces] = useState<MemoryPalace[]>([]);
+  const [allTags, setAllTags] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStep, setGenerationStep] = useState(0);
   const [shareToast, setShareToast] = useState<string | null>(null);
 
+  const {
+    palaceFilter,
+    setPalaceSearchQuery,
+    setPalaceSelectedTag,
+    setPalacePreviousPage,
+    clearPalaceFilters,
+    resetPalaceFiltersIfNeeded,
+  } = useAppStateStore();
+
   useEffect(() => {
+    resetPalaceFiltersIfNeeded(location.pathname);
     loadPalaces();
+    loadTags();
+    return () => {
+      setPalacePreviousPage(location.pathname);
+    };
   }, []);
 
   const loadPalaces = async () => {
@@ -242,6 +352,39 @@ export default function MemoryPalacePage() {
       setIsLoading(false);
     }
   };
+
+  const loadTags = async () => {
+    const tags = await getAllTags();
+    setAllTags(tags);
+  };
+
+  const handleTagChange = async () => {
+    await loadPalaces();
+    await loadTags();
+  };
+
+  const filteredPalaces = useMemo(() => {
+    let result = [...palaces];
+
+    if (palaceFilter.searchQuery.trim()) {
+      const query = palaceFilter.searchQuery.toLowerCase();
+      result = result.filter(
+        (p) =>
+          p.name.toLowerCase().includes(query) ||
+          p.description.toLowerCase().includes(query)
+      );
+    }
+
+    if (palaceFilter.selectedTag) {
+      result = result.filter(
+        (p) => p.tags && p.tags.includes(palaceFilter.selectedTag!)
+      );
+    }
+
+    return result;
+  }, [palaces, palaceFilter.searchQuery, palaceFilter.selectedTag]);
+
+  const hasActiveFilters = palaceFilter.searchQuery.trim() || palaceFilter.selectedTag;
 
   const handleRecordingComplete = async (
     blob: Blob,
@@ -271,6 +414,7 @@ export default function MemoryPalacePage() {
         voiceBlobUrl,
         sceneData,
         isShared: false,
+        tags: [],
       } as Omit<MemoryPalace, 'id' | 'createdAt'> & { id: string });
       setGenerationStep(2);
 
@@ -423,6 +567,86 @@ export default function MemoryPalacePage() {
                     )}
                   </div>
 
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="mb-6 space-y-4"
+                  >
+                    <div className="relative">
+                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+                      <input
+                        type="text"
+                        value={palaceFilter.searchQuery}
+                        onChange={(e) => setPalaceSearchQuery(e.target.value)}
+                        placeholder="搜索宫殿名称或描述..."
+                        className="w-full pl-12 pr-12 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white/90 placeholder:text-white/40 outline-none focus:border-amber-400/40 focus:bg-white/8 transition-all duration-300"
+                      />
+                      {palaceFilter.searchQuery && (
+                        <motion.button
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          onClick={() => setPalaceSearchQuery('')}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-white/60 hover:text-white/90 hover:bg-white/20 transition-all"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </motion.button>
+                      )}
+                    </div>
+
+                    {allTags.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-1.5 mr-2">
+                          <Tag className="w-4 h-4 text-amber-300/70" />
+                          <span className="text-white/50 text-sm">标签：</span>
+                        </div>
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => setPalaceSelectedTag(null)}
+                          className={cn(
+                            'px-3.5 py-1.5 rounded-full text-sm transition-all duration-200',
+                            !palaceFilter.selectedTag
+                              ? 'bg-amber-500/25 border border-amber-400/40 text-amber-200'
+                              : 'bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 hover:text-white/80'
+                          )}
+                        >
+                          全部
+                        </motion.button>
+                        {allTags.map((tag) => (
+                          <motion.button
+                            key={tag}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() =>
+                              setPalaceSelectedTag(
+                                palaceFilter.selectedTag === tag ? null : tag
+                              )
+                            }
+                            className={cn(
+                              'inline-flex items-center gap-1 px-3.5 py-1.5 rounded-full text-sm transition-all duration-200',
+                              palaceFilter.selectedTag === tag
+                                ? 'bg-amber-500/25 border border-amber-400/40 text-amber-200'
+                                : 'bg-white/5 border border-white/10 text-white/60 hover:bg-white/10 hover:text-white/80'
+                            )}
+                          >
+                            <Hash className="w-3.5 h-3.5" />
+                            {tag}
+                          </motion.button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 px-4 py-3 rounded-2xl bg-white/5 border border-white/10">
+                        <Tag className="w-4 h-4 text-white/30" />
+                        <p className="text-white/40 text-sm">
+                          还没有标签，点击卡片上的「+ 标签」为宫殿添加自定义分类吧~
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
+
                   {isLoading ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                       {[0, 1, 2].map((i) => (
@@ -472,21 +696,92 @@ export default function MemoryPalacePage() {
                         <span>提示：试着描述「童年的老房子」或「和朋友去过的海边」</span>
                       </motion.div>
                     </motion.div>
-                  ) : (
+                  ) : filteredPalaces.length === 0 ? (
                     <motion.div
-                      layout
-                      className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.5 }}
+                      className="py-16 flex flex-col items-center text-center"
                     >
-                      {palaces.map((palace, i) => (
-                        <PalaceCard
-                          key={palace.id}
-                          palace={palace}
-                          index={i}
-                          onEnter={handleEnterPalace}
-                          onShare={handleShare}
-                        />
-                      ))}
+                      <motion.div
+                        animate={{
+                          y: [0, -6, 0],
+                        }}
+                        transition={{
+                          duration: 2.5,
+                          repeat: Infinity,
+                          ease: 'easeInOut',
+                        }}
+                        className="w-24 h-24 rounded-3xl bg-gradient-to-br from-cyan-500/20 to-purple-500/20 border border-cyan-400/20 flex items-center justify-center mb-6"
+                      >
+                        <Search className="w-12 h-12 text-cyan-300/60" />
+                      </motion.div>
+                      <h3 className="text-2xl font-bold text-white/90 mb-3">
+                        没有找到匹配的记忆宫殿
+                      </h3>
+                      <p className="text-white/50 text-base max-w-md mb-6 leading-relaxed">
+                        {palaceFilter.searchQuery && (
+                          <>
+                            搜索词「<span className="text-amber-300/80">{palaceFilter.searchQuery}</span>」
+                            {palaceFilter.selectedTag && <> 和 </>}
+                          </>
+                        )}
+                        {palaceFilter.selectedTag && (
+                          <>
+                            标签「<span className="text-amber-300/80">{palaceFilter.selectedTag}</span>」
+                          </>
+                        )}
+                        <br />
+                        没有匹配到任何宫殿，试试其他条件吧~
+                      </p>
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={clearPalaceFilters}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-gradient-to-r from-amber-500/25 to-rose-500/25 border border-amber-400/30 text-amber-200 hover:from-amber-500/35 hover:to-rose-500/35 transition-all duration-300"
+                      >
+                        <X className="w-4 h-4" />
+                        清除条件
+                      </motion.button>
                     </motion.div>
+                  ) : (
+                    <>
+                      {hasActiveFilters && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          className="flex items-center justify-between mb-4 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-400/20"
+                        >
+                          <p className="text-white/60 text-sm">
+                            找到 <span className="text-amber-300 font-medium">{filteredPalaces.length}</span> 座匹配的宫殿
+                          </p>
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={clearPalaceFilters}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs hover:bg-white/10 hover:text-white/80 transition-all"
+                          >
+                            <X className="w-3 h-3" />
+                            清除
+                          </motion.button>
+                        </motion.div>
+                      )}
+                      <motion.div
+                        layout
+                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+                      >
+                        {filteredPalaces.map((palace, i) => (
+                          <PalaceCard
+                            key={palace.id}
+                            palace={palace}
+                            index={i}
+                            onEnter={handleEnterPalace}
+                            onShare={handleShare}
+                            onTagChange={handleTagChange}
+                          />
+                        ))}
+                      </motion.div>
+                    </>
                   )}
                 </section>
               </motion.div>
